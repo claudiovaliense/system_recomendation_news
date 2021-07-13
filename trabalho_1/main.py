@@ -2,6 +2,7 @@
 import sys
 import numpy
 #import math
+import statistics
 
 def k_max_index(array, k):
     """ Return index of max values, more eficient. Example: k_max_index2([2, 4, 5, 1, 8], 2)"""
@@ -18,14 +19,14 @@ def cosine(x, y):
     return dot_products / (norm_products + EPSILON)
 
 def leitura(rating):
-    """"Leitura dos dados."""
+    """Leitura dos dados."""
     rating = open(rating)    
     next(rating) # jump head
     user_item = dict()
     item_user = dict()
     cont = 0
     for line in rating: # criar dicionario que tem as relacoes dos usuario, itens e notas
-        if cont==1000000: break
+        if cont==3000: break
         cont+=1
         line = line.strip().split(",")
         user_item_line = line[0].split(":")
@@ -39,7 +40,7 @@ def leitura(rating):
     return user_item, item_user    
 
 def matrix(user_item, item_users):
-    """"Cria a matrix user (linha) x itens (coluna)"""
+    """Cria a matrix user (linha) x itens (coluna)"""
     list_itens = []
     #matriz_user_item = numpy.zeros( len( item_users))
     matriz_user_item = []
@@ -72,8 +73,7 @@ def similaridade_entre_users(user_item, item_user, matriz_user_item):
         users_similaridade[keys_users[index_line]] = escores_user
     return users_similaridade
 
-def similaridade_entre_users2(user_item, item_users, matriz_user_item, targets):
-    
+def similaridade_entre_users2(user_item, item_users, matriz_user_item, targets):    
     index_user = dict()
     cont=0
     for user in user_item.keys():        
@@ -87,19 +87,27 @@ def similaridade_entre_users2(user_item, item_users, matriz_user_item, targets):
         
     targets = open(targets)
     next(targets) # jump head
-    for line in targets:  
-        print(line) 
+    for line in targets:          
         escores_user = []             
         target_user_item = line.strip().split(":")
+        if item_users.get(target_user_item[1] ) == None:
+            continue
+        
+        itens_consumidos = item_users[ target_user_item[1] ]
+        
         if user_item.get(target_user_item[0]) == None: # usuario novo            
             pass
         else:
-            index_matrix = index_user[ target_user_item[0]] 
-            for  index_line in range( len( matriz_user_item) ): # calcula a similaridade do alvo com os outros usuarios
+            index_matrix = index_user[ target_user_item[0] ] 
+            #for  index_line in range( len( matriz_user_item) ): # calcula a similaridade do alvo com os outros usuarios
+            for  index_line in itens_consumidos: # calcula a similaridade do alvo com os outros usuarios
+                index_line = index_user[ index_line[0] ]
+                #print(index_line); exit()
                 if index_line != index_matrix:
                     escore = cosine(numpy.array(matriz_user_item[index_matrix]), numpy.array(matriz_user_item[index_line]))
+                    #escore = (cos.cosine_similarity( [matriz_user_item[index_matrix]], [matriz_user_item[index_line]] ))[0][0] 
                     escores_user.append(escore)
-                    
+            
             k_similares_index = k_max_index(escores_user, 3) # escolhe os 3 mais similares  
             for index_k_user in k_similares_index: # buca a nota dos mais similares
                 if index_itens.get( target_user_item[1] ) == None: # item novo
@@ -110,7 +118,6 @@ def similaridade_entre_users2(user_item, item_users, matriz_user_item, targets):
                     contribuicao_vizinho = nota_vizinho# * k_similares[index_k_user]
                     if contribuicao_vizinho != 0:
                         print( contribuicao_vizinho )
-            
 
 def cruzamento_dados(user_item, item_users, matriz_user_item, users_similaridade,  targets):
     index_itens = dict()
@@ -139,9 +146,41 @@ def cruzamento_dados(user_item, item_users, matriz_user_item, users_similaridade
                     if contribuicao_vizinho != 0:
                         print( contribuicao_vizinho )
 
+def media(user_item, item_users, matriz_user_item, targets):
+    escreve = open('saida', 'w')
+    escreve.write('UserId:ItemId,Prediction\n')
+    
+    index_user = dict()
+    cont=0
+    for user in user_item.keys():        
+        index_user[user] = cont
+        cont+=1  
+    index_itens = dict()
+    cont=0
+    for item_user in item_users.keys():        
+        index_itens[item_user] = cont
+        cont+=1
+    
+    targets = open(targets)
+    next(targets) # jump head
+    for line in targets:
+        target_user_item = line.strip().split(":")        
+        #if user_item.get(target_user_item[0]) == None: # usuario novo            
+        if item_users.get(target_user_item[1]) == None: # usuario novo  
+            escreve.write(f'{line.strip()},5\n') 
+            pass
+        else:
+            #index_matrix = index_user[ target_user_item[0]] 
+            #notas_user = [v[1] for v in user_item[target_user_item[0]]]
+            notas_user = [v[1] for v in item_users[target_user_item[1]]]
+            escreve.write(f'{line.strip()},{statistics.mean(notas_user)}\n')            
+        
+
+
 if __name__ == "__main__":
-    user_item, item_user = leitura(sys.argv[1])
-    matriz_user_item = matrix(user_item, item_user)    
+    user_item, item_user = leitura(sys.argv[1])    
+    matriz_user_item = matrix(user_item, item_user)  
+    #media(user_item, item_user, matriz_user_item, sys.argv[2])
     similaridade_entre_users2(user_item, item_user, matriz_user_item, sys.argv[2])
     #users_similaridade = similaridade_entre_users(user_item, item_user, matriz_user_item)
     #cruzamento_dados(user_item, item_user, matriz_user_item, users_similaridade, sys.argv[2])    
