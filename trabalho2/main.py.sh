@@ -1,0 +1,1 @@
+python main_texto.py content.csv ratings.csv targets.csv

@@ -4,6 +4,27 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import sklearn.metrics.pairwise as cos  # Calculate similarity cosine
 import torch
+import numpy as np
+import statistics
+import sys
+import scipy.stats as stats # Calcular intervalo de confiança
+
+
+def arredonda(number, precisao=2):
+    """ Arredonda number in precision. Example: arredonda(2.1234, 2); Return='2.12'"""
+    return float(f'%.{precisao}f'%(number))
+
+def ic(tamanho, std, confianca, type='t', lado=2):
+    """Calcula o intervalo de confianca"""
+    if lado is 1:
+        lado = (1 - confianca) # um lado o intervalo fica mais estreito
+    else:
+        lado = (1 - confianca) /2 
+        
+    #print(f'Valor de t: {stats.t.ppf(1- (lado), tamanho-1) }')    
+    if type is 'normal':
+        return stats.norm.ppf(1 - (lado)) * ( std / ( tamanho ** (1/2) ) )
+    return stats.t.ppf(1- (lado), tamanho-1) * ( std / ( tamanho ** (1/2) ) ) 
 
 def assign_GPU(Tokenizer_output):
     tokens_tensor = Tokenizer_output['input_ids'].to('cuda:0')    
@@ -73,11 +94,48 @@ def print_box_plot(data, interval_y=None):
     plt.savefig('fig/fig.png', format='png') 
 #print_box_plot([1, 5, 25, 54, 3], [0,30])
 
+def mean_reciprocal_rank_claudio(rs):        
+    rr = []
+    for r in rs:
+        try: 
+            r = r.index(1) +1
+        except:
+            r = 130
+            #r = sys.maxsize # considerar que o elemento nao existe
+            #r = len(r)+1 # considerar que o item relevante esta na proxima posicao depois do k        
+        rr.append(1 / r )
+    return arredonda(statistics.mean(rr) ), arredonda(ic(len(rr), statistics.stdev(rr), 0.95) )
+    #return arredonda(100* statistics.mean(rr) ), arredonda(100* ic(len(rr), statistics.stdev(rr), 0.95) )
+
+
+def mean_reciprocal_rank(rs):    
+    rs = (np.asarray(r).nonzero()[0] for r in rs)       
+    return np.mean([1. / (r[0] + 1) if r.size else 0. for r in rs])
+    
+
+def precision_at_k(r, k):    
+    assert k >= 1
+    r = np.asarray(r)[:k] != 0
+    if r.size != k:
+        raise ValueError('Relevance score length < k')
+    return np.mean(r)
+
+def average_precision(r):    
+    r = np.asarray(r) != 0
+    out = [precision_at_k(r, k + 1) for k in range(r.size) if r[k]]
+    if not out:
+        return 0.
+    return np.mean(out)
+
+def mean_average_precision(rs):    
+    return np.mean([average_precision(r) for r in rs])
+
 def read_data():
     articles = cv.arquivo_para_corpus_delimiter(f'dataset/archive/shared_articles.csv', ',')#, 1000) # 0 timestamp, 2 contenId, 3 authorPersonId,  10 title, 11 text
     user = cv.arquivo_para_corpus_delimiter(f'dataset/archive/users_interactions.csv', ',')#, 1000)     
 
-    articles_dict = dict()    
+    # indices: 0 timestamp, 2 identificacao conteudo, 3 identificacao autor, 10 titulo, -1 lang
+    articles_dict = dict()   # dicionario onde as chaves sao as identificacoes dos autores 
     for index_row in range(1, len( articles)):
         if articles[index_row][-1] != 'en': # filter english
             continue
@@ -87,7 +145,7 @@ def read_data():
 
     chave_2 = []
     for k, v in articles_dict.items():
-        if len(v)==2:
+        if len(v)>=2:
             chave_2.append( k)
     
     print(len(chave_2))
@@ -95,25 +153,72 @@ def read_data():
     
     x_train = []; x_test = []; ground_truth = []
     for k in chave_2:
-        x_train.append( articles_dict[k][0]['title'])
-        x_test.append( articles_dict[k][1]['title'])
+        qtd_noticias_user = len(articles_dict[k])
+        #if qtd_noticias_user > 5:
+        #    qtd_noticias_user= 5
+        #print(qtd_noticias_user)
+        #qtd_noticias_user = 2
+        titles = []
+        limit_k = 2; cont=0
+        for index_noticia_user in range(qtd_noticias_user-1): # -1 porque a ultima é teste        
+            if cont == limit_k: 
+                break
+            cont+=1
+            #titles.append( representation_bert( [ articles_dict[k][index_noticia_user]['title'] ], 'bert_concat') [0] )
+            #titles.append( articles_dict[k][index_noticia_user]['title'] )            
+            titles.append( articles_dict[k][qtd_noticias_user-2 - index_noticia_user]['title'] ) # pega as noticias mais recentes com excessao da ultima
+        
+        #temp = np.mean( representation_bert( titles, 'bert_avg') , axis=0)
+        #print(temp.shape); exit()
+        #x_train.append( np.mean( representation_bert( titles, 'bert_avg') , axis=0) )
+        #x_train.append( np.mean(titles, axis=0) )
+        #print(x_train); exit()
+        x_train.append( " ".join( titles ))
+        #x_train.append( " ".join( [articles_dict[k][0]['title'], articles_dict[k][1]['title'] ] ))
+        x_test.append( articles_dict[k][-1]['title'])
+        #x_test.append( representation_bert( [ articles_dict[k][-1]['title'] ], 'bert_avg')[0]  )
     
-    for i in range( len( x_train)): print(f'{i}: {x_train[i]}')
-    for i in range( len( x_test)): print(f'{i}: {x_test[i]}')
+    #for i in range( len( x_train)): print(f'{i}: {x_train[i]}')
+    #for i in range( len( x_test)): print(f'{i}: {x_test[i]}')
     
     x_train = [cv.preprocessor(x) for x in x_train]
     x_test = [cv.preprocessor(x) for x in x_test]
-    x_train = representation_bert(x_train, 'bert_concat')
-    x_test = representation_bert(x_test, 'bert_concat')
+    #x_train = representation_bert(x_train, 'bert_concat')
+    #x_test = representation_bert(x_test, 'bert_concat')
+
+    #np.save('temp/x_train_all_bert_ultimas', x_train); np.save('temp/x_test_all_bert_ultimas', x_test)
+    x_train = np.load('temp/x_train_all_bert_ultimas.npy');x_test = np.load('temp/x_test_all_bert_ultimas.npy')
+    #x_train = np.load('temp/x_train3.npy'); x_test = np.load('temp/x_test3.npy')
+    #x_train = np.load('temp/x_train_all.npy'); x_test = np.load('temp/x_test_all.npy')
+    
 
     #for i in range( len( x_test)): print(f'{i}: {cv.arredonda(100*(cos.cosine_similarity( [x_train[0]], [x_test[i]] ))[0][0])} ')
-    escore = []
-    avaliar = 10
-    for i in range( len( x_test)): 
-        escore.append( cv.arredonda(100*(cos.cosine_similarity( [x_train[avaliar]], [x_test[i]] ))[0][0]) )
-    topk = cv.k_max_index2(escore, 20)
-    print(topk)
-    print(f'Escore top: {escore[topk[0]]}, escore gabarito: {escore[avaliar]}')    
+    predicoes_all = []
+    k = 130# limitar a olhar as k posicoes
+    for avaliar in range(len(x_train)):
+        escore = []
+        #avaliar = 10 # avaliar usuario com indice 10, o indice 10 é onde esta o elemento relevante para o usuario
+        for i in range( len( x_test)): 
+            escore.append( cv.arredonda(100*(cos.cosine_similarity( [x_train[avaliar]], [x_test[i]] ))[0][0]) )
+        topk = cv.k_max_index2(escore, k)
+        
+        predicao = []
+        valido = False; index_certo = -1
+        for index_top in range( len(topk)):
+            if topk[index_top] in [avaliar]:
+                valido = True
+                index_certo= index_top
+                predicao.append(1)
+            else:
+                predicao.append(0)
+        #if valido == True:            
+        predicoes_all.append(predicao)
+        print(avaliar, topk, index_certo)
+    print(len(predicoes_all))
+    print(f'MRR: {mean_reciprocal_rank_claudio(predicoes_all)[0]} +/- {mean_reciprocal_rank_claudio(predicoes_all)[1]}')
+    print(f'MRR: {mean_reciprocal_rank(predicoes_all)} ')
+    #print(f'MAP: {mean_average_precision(predicoes_all)}')
+    #print(f'Escore top: {escore[topk[0]]}, escore gabarito: {escore[avaliar]}')    
 
 
 if __name__ == "__main__":
